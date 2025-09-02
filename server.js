@@ -308,6 +308,285 @@ app.get('/api/assets', requireAuth, (req, res) => {
   }
 });
 
+// Get single asset with components
+app.get('/api/assets/:id', requireAuth, (req, res) => {
+  try {
+    const assetId = req.params.id;
+
+    // Get asset details
+    const assetStmt = db.prepare(`
+      SELECT a.*, u.name as owner_name
+      FROM assets a
+      JOIN users u ON a.owner_id = u.id
+      WHERE a.id = ? AND a.is_deleted = 0
+    `);
+    const asset = assetStmt.get(assetId);
+
+    if (!asset) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    // Check access permission
+    if (req.user.role !== 'super_admin' && asset.owner_id !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE asset_id = ? AND user_id = ? AND is_active = 1
+      `);
+      const access = accessStmt.get(assetId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Get components with hierarchy
+    const componentsStmt = db.prepare(`
+      SELECT c.*, 
+             (SELECT COUNT(*) FROM components WHERE parent_id = c.id AND is_deleted = 0) as child_count
+      FROM components c
+      WHERE c.asset_id = ? AND c.is_deleted = 0
+      ORDER BY c.parent_id ASC, c.display_order ASC
+    `);
+    const components = componentsStmt.all(assetId);
+
+    // Get recent works for this asset
+    const worksStmt = db.prepare(`
+      SELECT w.*, u.name as initiated_by_name
+      FROM works w
+      JOIN users u ON w.initiated_by = u.id
+      WHERE w.asset_id = ? AND w.is_deleted = 0
+      ORDER BY w.created_at DESC
+      LIMIT 5
+    `);
+    const recentWorks = worksStmt.all(assetId);
+
+    // Parse metadata
+    let metadata = {};
+    try {
+      if (asset.metadata_json) {
+        metadata = JSON.parse(asset.metadata_json);
+      }
+    } catch (error) {
+      console.error('Error parsing metadata:', error);
+    }
+
+    res.json({ 
+      asset: { ...asset, metadata }, 
+      components,
+      recentWorks
+    });
+  } catch (error) {
+    console.error('Get asset error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update asset
+app.put('/api/assets/:id', requireAuth, (req, res) => {
+  try {
+    const assetId = req.params.id;
+    const { name, type, metadata } = req.body;
+
+    // Check ownership/access
+    const assetStmt = db.prepare('SELECT * FROM assets WHERE id = ? AND is_deleted = 0');
+    const asset = assetStmt.get(assetId);
+    if (!asset) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && asset.owner_id !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE asset_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(assetId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Update asset
+    const updateStmt = db.prepare(`
+      UPDATE assets
+      SET name = ?, type = ?, metadata_json = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    updateStmt.run(name, type, JSON.stringify(metadata), assetId);
+
+    res.json({ message: 'Asset updated successfully' });
+  } catch (error) {
+    console.error('Update asset error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Component management routes
+app.get('/api/assets/:id/components', requireAuth, (req, res) => {
+  try {
+    const assetId = req.params.id;
+
+    // Check asset access
+    const assetStmt = db.prepare('SELECT * FROM assets WHERE id = ? AND is_deleted = 0');
+    const asset = assetStmt.get(assetId);
+    if (!asset) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    // Get components with hierarchy
+    const componentsStmt = db.prepare(`
+      SELECT c.*, 
+             (SELECT COUNT(*) FROM components WHERE parent_id = c.id AND is_deleted = 0) as child_count
+      FROM components c
+      WHERE c.asset_id = ? AND c.is_deleted = 0
+      ORDER BY c.parent_id ASC, c.display_order ASC
+    `);
+    const components = componentsStmt.all(assetId);
+
+    res.json({ components });
+  } catch (error) {
+    console.error('Get components error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/assets/:id/components', requireAuth, (req, res) => {
+  try {
+    const assetId = req.params.id;
+    const { name, parentId, captureFields, displayOrder } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'Component name is required' });
+    }
+
+    // Check asset access
+    const assetStmt = db.prepare('SELECT * FROM assets WHERE id = ? AND is_deleted = 0');
+    const asset = assetStmt.get(assetId);
+    if (!asset) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && asset.owner_id !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE asset_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(assetId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Create component
+    const componentStmt = db.prepare(`
+      INSERT INTO components (asset_id, parent_id, name, capture_fields_json, display_order)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const result = componentStmt.run(
+      assetId, 
+      parentId || null, 
+      name, 
+      JSON.stringify(captureFields || []),
+      displayOrder || 0
+    );
+
+    res.status(201).json({ componentId: result.lastInsertRowid });
+  } catch (error) {
+    console.error('Create component error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.put('/api/assets/:assetId/components/:componentId', requireAuth, (req, res) => {
+  try {
+    const { assetId, componentId } = req.params;
+    const { name, captureFields, displayOrder } = req.body;
+
+    // Check component exists and belongs to asset
+    const componentStmt = db.prepare(`
+      SELECT c.*, a.owner_id
+      FROM components c
+      JOIN assets a ON c.asset_id = a.id
+      WHERE c.id = ? AND c.asset_id = ? AND c.is_deleted = 0
+    `);
+    const component = componentStmt.get(componentId, assetId);
+    if (!component) {
+      return res.status(404).json({ error: 'Component not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 'super_admin' && component.owner_id !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE asset_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(assetId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Update component
+    const updateStmt = db.prepare(`
+      UPDATE components
+      SET name = ?, capture_fields_json = ?, display_order = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    updateStmt.run(
+      name, 
+      JSON.stringify(captureFields || []),
+      displayOrder || 0,
+      componentId
+    );
+
+    res.json({ message: 'Component updated successfully' });
+  } catch (error) {
+    console.error('Update component error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/assets/:assetId/components/:componentId', requireAuth, (req, res) => {
+  try {
+    const { assetId, componentId } = req.params;
+
+    // Check component exists and belongs to asset
+    const componentStmt = db.prepare(`
+      SELECT c.*, a.owner_id
+      FROM components c
+      JOIN assets a ON c.asset_id = a.id
+      WHERE c.id = ? AND c.asset_id = ? AND c.is_deleted = 0
+    `);
+    const component = componentStmt.get(componentId, assetId);
+    if (!component) {
+      return res.status(404).json({ error: 'Component not found' });
+    }
+
+    // Check access
+    if (req.user.role !== 'super_admin' && component.owner_id !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE asset_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(assetId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Soft delete component and all child components
+    const deleteStmt = db.prepare(`
+      UPDATE components
+      SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, deleted_by = ?
+      WHERE (id = ? OR parent_id = ?) AND asset_id = ?
+    `);
+    deleteStmt.run(req.user.id, componentId, componentId, assetId);
+
+    res.json({ message: 'Component deleted successfully' });
+  } catch (error) {
+    console.error('Delete component error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.post('/api/assets', requireAuth, (req, res) => {
   try {
     const { name, type, importTemplate } = req.body;
@@ -427,6 +706,331 @@ app.get('/api/works', requireAuth, (req, res) => {
   }
 });
 
+// Get single work with details
+app.get('/api/works/:id', requireAuth, (req, res) => {
+  try {
+    const workId = req.params.id;
+
+    // Get work details
+    const workStmt = db.prepare(`
+      SELECT w.*, a.name as asset_name, u.name as initiated_by_name
+      FROM works w
+      JOIN assets a ON w.asset_id = a.id
+      JOIN users u ON w.initiated_by = u.id
+      WHERE w.id = ? AND w.is_deleted = 0
+    `);
+    const work = workStmt.get(workId);
+
+    if (!work) {
+      return res.status(404).json({ error: 'Work not found' });
+    }
+
+    // Check access permission
+    if (req.user.role !== 'super_admin' && work.initiated_by !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE work_id = ? AND user_id = ? AND is_active = 1
+      `);
+      const access = accessStmt.get(workId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    // Get asset components for this work
+    const componentsStmt = db.prepare(`
+      SELECT c.*, 
+             (SELECT COUNT(*) FROM evidence WHERE work_id = ? AND component_id = c.id AND is_deleted = 0) as evidence_count
+      FROM components c
+      WHERE c.asset_id = ? AND c.is_deleted = 0
+      ORDER BY c.parent_id ASC, c.display_order ASC
+    `);
+    const components = componentsStmt.all(workId, work.asset_id);
+
+    // Get evidence for components
+    const evidenceStmt = db.prepare(`
+      SELECT e.*, u.name as captured_by_name
+      FROM evidence e
+      JOIN users u ON e.captured_by = u.id
+      WHERE e.work_id = ? AND e.is_deleted = 0
+      ORDER BY e.component_id, e.captured_at ASC
+    `);
+    const evidence = evidenceStmt.all(workId);
+
+    // Get team members
+    const teamStmt = db.prepare(`
+      SELECT u.id, u.name, u.email, ac.permission_type
+      FROM users u
+      JOIN access_control ac ON u.id = ac.user_id
+      WHERE ac.work_id = ? AND ac.is_active = 1
+    `);
+    const team = teamStmt.all(workId);
+
+    // Get current locks
+    const locksStmt = db.prepare(`
+      SELECT el.*, u.name as locked_by_name, c.name as component_name
+      FROM edit_locks el
+      JOIN users u ON el.locked_by = u.id
+      JOIN components c ON el.component_id = c.id
+      WHERE el.work_id = ? AND (el.expires_at IS NULL OR el.expires_at > CURRENT_TIMESTAMP)
+    `);
+    const locks = locksStmt.all(workId);
+
+    // Parse JSON fields
+    let setupData = {};
+    let deliveryData = {};
+    try {
+      if (work.setup_data_json) {
+        setupData = JSON.parse(work.setup_data_json);
+      }
+      if (work.delivery_data_json) {
+        deliveryData = JSON.parse(work.delivery_data_json);
+      }
+    } catch (error) {
+      console.error('Error parsing work data:', error);
+    }
+
+    res.json({ 
+      work: { ...work, setupData, deliveryData },
+      components,
+      evidence,
+      team,
+      locks
+    });
+  } catch (error) {
+    console.error('Get work error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Start work (move from draft to in_progress)
+app.post('/api/works/:id/start', requireAuth, (req, res) => {
+  try {
+    const workId = req.params.id;
+
+    // Check work exists and user has permission
+    const workStmt = db.prepare('SELECT * FROM works WHERE id = ? AND is_deleted = 0');
+    const work = workStmt.get(workId);
+    if (!work) {
+      return res.status(404).json({ error: 'Work not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && work.initiated_by !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE work_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(workId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    if (work.status !== 'draft') {
+      return res.status(400).json({ error: 'Work is not in draft status' });
+    }
+
+    // Update work status
+    const updateStmt = db.prepare(`
+      UPDATE works
+      SET status = 'in_progress', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    updateStmt.run(workId);
+
+    res.json({ message: 'Work started successfully' });
+  } catch (error) {
+    console.error('Start work error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Complete work
+app.post('/api/works/:id/complete', requireAuth, (req, res) => {
+  try {
+    const workId = req.params.id;
+
+    // Check work exists and user has permission
+    const workStmt = db.prepare('SELECT * FROM works WHERE id = ? AND is_deleted = 0');
+    const work = workStmt.get(workId);
+    if (!work) {
+      return res.status(404).json({ error: 'Work not found' });
+    }
+
+    if (req.user.role !== 'super_admin' && work.initiated_by !== req.user.id) {
+      const accessStmt = db.prepare(`
+        SELECT * FROM access_control
+        WHERE work_id = ? AND user_id = ? AND is_active = 1 AND permission_type IN ('edit', 'admin')
+      `);
+      const access = accessStmt.get(workId, req.user.id);
+      if (!access) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    if (work.status !== 'in_progress') {
+      return res.status(400).json({ error: 'Work is not in progress' });
+    }
+
+    // Update work status
+    const updateStmt = db.prepare(`
+      UPDATE works
+      SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    updateStmt.run(workId);
+
+    // Clear all locks for this work
+    const clearLocksStmt = db.prepare('DELETE FROM edit_locks WHERE work_id = ?');
+    clearLocksStmt.run(workId);
+
+    res.json({ message: 'Work completed successfully' });
+  } catch (error) {
+    console.error('Complete work error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Evidence management
+app.post('/api/works/:workId/evidence', requireAuth, upload.array('files', 10), async (req, res) => {
+  try {
+    const workId = req.params.workId;
+    const { componentId, fieldName, evidenceType, value } = req.body;
+
+    if (!componentId || !fieldName || !evidenceType) {
+      return res.status(400).json({ error: 'Component ID, field name, and evidence type are required' });
+    }
+
+    // Check work access
+    const workStmt = db.prepare('SELECT * FROM works WHERE id = ? AND is_deleted = 0');
+    const work = workStmt.get(workId);
+    if (!work) {
+      return res.status(404).json({ error: 'Work not found' });
+    }
+
+    if (work.status === 'completed') {
+      return res.status(400).json({ error: 'Cannot add evidence to completed work' });
+    }
+
+    // Check component exists or handle special screenshot component
+    let component = null;
+    if (componentId === 'screenshot') {
+      // Special virtual component for screenshots
+      component = {
+        id: 'screenshot',
+        name: 'Video Screenshots',
+        asset_id: work.asset_id
+      };
+    } else {
+      const componentStmt = db.prepare(`
+        SELECT c.* FROM components c
+        WHERE c.id = ? AND c.asset_id = ? AND c.is_deleted = 0
+      `);
+      component = componentStmt.get(componentId, work.asset_id);
+      if (!component) {
+        return res.status(404).json({ error: 'Component not found' });
+      }
+    }
+
+    const evidenceStmt = db.prepare(`
+      INSERT INTO evidence (work_id, component_id, field_name, evidence_type, value, file_path, file_size_kb, original_filename, captured_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    // Handle file upload
+    if (req.files && req.files.length > 0) {
+      const file = req.files[0];
+      const uploadDir = path.join(config.uploads.base_path, 'works', workId.toString(), componentId.toString());
+      fs.mkdirSync(uploadDir, { recursive: true });
+
+      let filePath = path.join(uploadDir, `${Date.now()}_${file.originalname}`);
+      
+      // Process images
+      if (config.uploads.allowed_image_types.includes(path.extname(file.originalname).toLowerCase().slice(1))) {
+        filePath = await processImage(file.buffer, file.originalname);
+        const finalPath = path.join(uploadDir, path.basename(filePath));
+        fs.renameSync(filePath, finalPath);
+        filePath = finalPath;
+      } else {
+        fs.writeFileSync(filePath, file.buffer);
+      }
+
+      const fileSize = Math.round(fs.statSync(filePath).size / 1024);
+      evidenceStmt.run(workId, componentId, fieldName, evidenceType, value || '', filePath, fileSize, file.originalname, req.user.id);
+    } else {
+      evidenceStmt.run(workId, componentId, fieldName, evidenceType, value || '', null, null, null, req.user.id);
+    }
+
+    res.json({ message: 'Evidence saved successfully' });
+  } catch (error) {
+    console.error('Save evidence error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Component locking
+app.post('/api/works/:workId/components/:componentId/lock', requireAuth, (req, res) => {
+  try {
+    const { workId, componentId } = req.params;
+
+    // Check if component is already locked
+    const existingLockStmt = db.prepare(`
+      SELECT * FROM edit_locks
+      WHERE work_id = ? AND component_id = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+    `);
+    const existingLock = existingLockStmt.get(workId, componentId);
+
+    if (existingLock && existingLock.locked_by !== req.user.id) {
+      return res.status(423).json({ error: 'Component is locked by another user' });
+    }
+
+    // Create or update lock
+    const lockStmt = db.prepare(`
+      INSERT OR REPLACE INTO edit_locks (work_id, component_id, locked_by, expires_at)
+      VALUES (?, ?, ?, datetime('now', '+' || ? || ' seconds'))
+    `);
+    lockStmt.run(workId, componentId, req.user.id, config.security.component_lock_timeout_seconds);
+
+    // Broadcast lock status
+    io.to(`work-${workId}`).emit('component-locked', {
+      workId,
+      componentId,
+      lockedBy: req.user.id,
+      lockedByName: req.user.name
+    });
+
+    res.json({ message: 'Component locked successfully' });
+  } catch (error) {
+    console.error('Lock component error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/works/:workId/components/:componentId/lock', requireAuth, (req, res) => {
+  try {
+    const { workId, componentId } = req.params;
+
+    // Remove lock
+    const unlockStmt = db.prepare(`
+      DELETE FROM edit_locks
+      WHERE work_id = ? AND component_id = ? AND locked_by = ?
+    `);
+    unlockStmt.run(workId, componentId, req.user.id);
+
+    // Broadcast unlock status
+    io.to(`work-${workId}`).emit('component-unlocked', {
+      workId,
+      componentId,
+      unlockedBy: req.user.id
+    });
+
+    res.json({ message: 'Component unlocked successfully' });
+  } catch (error) {
+    console.error('Unlock component error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.post('/api/works', requireAuth, (req, res) => {
   try {
     const { workType, assetId, clientName, setupData } = req.body;
@@ -492,6 +1096,73 @@ io.on('connection', (socket) => {
     if (data.userId) {
       stmt.run(data.userId, data.assetId, data.workId, data.componentId, data.action, socket.id);
     }
+  });
+
+  // Video call events
+  socket.on('join-video-room', (data) => {
+    const { workId, userId, userName } = data;
+    const room = `video-${workId}`;
+    
+    socket.join(room);
+    console.log(`User ${userId} (${userName}) joined video room ${room}`);
+    
+    // Notify other users in the room
+    socket.to(room).emit('user-joined-video', {
+      userId,
+      userName,
+      socketId: socket.id
+    });
+  });
+  
+  socket.on('leave-video-room', (data) => {
+    const { workId, userId } = data;
+    const room = `video-${workId}`;
+    
+    socket.leave(room);
+    console.log(`User ${userId} left video room ${room}`);
+    
+    // Notify other users in the room
+    socket.to(room).emit('user-left-video', {
+      userId,
+      socketId: socket.id
+    });
+  });
+  
+  // WebRTC signaling
+  socket.on('webrtc-offer', (data) => {
+    const { workId, from, to, offer } = data;
+    const room = `video-${workId}`;
+    
+    // Send offer to specific user
+    socket.to(room).emit('webrtc-offer', {
+      from,
+      to,
+      offer
+    });
+  });
+  
+  socket.on('webrtc-answer', (data) => {
+    const { workId, from, to, answer } = data;
+    const room = `video-${workId}`;
+    
+    // Send answer to specific user
+    socket.to(room).emit('webrtc-answer', {
+      from,
+      to,
+      answer
+    });
+  });
+  
+  socket.on('webrtc-ice-candidate', (data) => {
+    const { workId, from, to, candidate } = data;
+    const room = `video-${workId}`;
+    
+    // Send ICE candidate to specific user
+    socket.to(room).emit('webrtc-ice-candidate', {
+      from,
+      to,
+      candidate
+    });
   });
 
   socket.on('disconnect', () => {
