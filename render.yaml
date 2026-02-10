@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: marinestream-api
+    runtime: node
+    buildCommand: npm install && cd packages/shared && npm run build && cd ../../apps/api && npx prisma generate && npm run build
+    startCommand: cd apps/api && npx prisma migrate deploy && npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: marinestream-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: marinestream-redis
+          type: redis
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: PORT
+        value: 3001
+    healthCheckPath: /api/v1/health
+    plan: starter
+
+  - type: web
+    name: marinestream-web
+    runtime: static
+    buildCommand: npm install && cd packages/shared && npm run build && cd ../../apps/web && npm run build
+    staticPublishPath: ./apps/web/dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=31536000
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  - name: marinestream-db
+    plan: starter
+    postgresMajorVersion: 16
