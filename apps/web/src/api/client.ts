@@ -26,15 +26,19 @@ type InternalRequestConfig = RequestConfig & {
   data?: BodyInit | null;
 };
 
+const RAW_API_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+const API_BASE = RAW_API_BASE ? RAW_API_BASE.replace(/\/+$/, '') : '';
+
 function buildUrl(url: string, params?: QueryParams): string {
-  if (!params) return `/api/v1${url}`;
+  const baseUrl = API_BASE ? `${API_BASE}${url}` : `/api/v1${url}`;
+  if (!params) return baseUrl;
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value == null) continue;
     search.append(key, String(value));
   }
   const query = search.toString();
-  return query ? `/api/v1${url}?${query}` : `/api/v1${url}`;
+  return query ? `${baseUrl}?${query}` : baseUrl;
 }
 
 function normalizeBody(data?: any): BodyInit | null {
@@ -55,7 +59,8 @@ async function parseResponseBody(response: Response): Promise<any> {
 
 async function refreshToken(): Promise<string | null> {
   try {
-    const response = await fetch('/api/v1/auth/refresh', {
+    const refreshUrl = API_BASE ? `${API_BASE}/auth/refresh` : '/api/v1/auth/refresh';
+    const response = await fetch(refreshUrl, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

@@ -40,6 +40,14 @@ npx prisma migrate dev --name init
 npx prisma generate
 ```
 
+If you are using an existing hosted Postgres database (for example Render), run:
+
+```bash
+cd apps/api
+npx prisma db push
+npx prisma generate
+```
+
 ### 4. Seed demo data
 
 ```bash
@@ -101,6 +109,29 @@ npm test
 ## Deployment
 
 The platform is configured for deployment on Render.com. See `render.yaml` for the blueprint.
+
+### Render Environment Variables
+
+Set these in the Render dashboard:
+
+- API service:
+  - `DATABASE_URL` (Render Postgres URL, include `?sslmode=require` for external URL)
+  - `JWT_SECRET`
+  - `APP_URL` (your web app URL)
+  - `API_URL` (your API public URL)
+  - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`
+- Web service:
+  - `VITE_API_URL` (example: `https://your-api.onrender.com/api/v1`)
+
+### Database Deployment Note
+
+Current migrations were originally generated against SQLite. For Render/Postgres deployment, the API start command uses:
+
+```bash
+npx prisma db push
+```
+
+This ensures the schema is applied correctly to Postgres during startup.
 
 ## Tech Stack
 

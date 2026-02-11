@@ -18,6 +18,16 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
+function getSocketServerOrigin(): string {
+  const apiBase = (import.meta.env.VITE_API_URL as string | undefined)?.trim();
+  if (!apiBase) return window.location.origin;
+  try {
+    return new URL(apiBase).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
 interface Peer { socketId: string; userId: string; userName: string; connection: RTCPeerConnection; stream?: MediaStream }
 interface VideoRoomProps { workOrderId: string; onScreenshot?: (dataUrl: string) => void; screenshotMode?: boolean; compact?: boolean }
 type DeviceState = { hasCamera: boolean; hasMic: boolean; checked: boolean };
@@ -76,7 +86,11 @@ export default function VideoRoom({ workOrderId, onScreenshot, screenshotMode, c
   }, []);
 
   useEffect(() => {
-    const s = io(window.location.origin, { path: '/socket.io', auth: { token: accessToken }, transports: ['polling', 'websocket'] });
+    const s = io(getSocketServerOrigin(), {
+      path: '/socket.io',
+      auth: { token: accessToken },
+      transports: ['polling', 'websocket'],
+    });
     setSocket(s);
     s.on('connect', () => s.emit('room:status', { workOrderId }));
     s.on('room:status', ({ count, isActive }: any) => { setRoomCount(count); setIsCallActive(isActive); });
