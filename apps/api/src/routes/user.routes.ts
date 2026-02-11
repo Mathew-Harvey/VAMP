@@ -4,7 +4,7 @@ import { requirePermission } from '../middleware/permissions';
 import { validate } from '../middleware/validate';
 import { inviteUserSchema, updateUserSchema } from '@marinestream/shared';
 import prisma from '../config/database';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 
 const router = Router();
 
@@ -27,7 +27,7 @@ router.post('/invite', authenticate, requirePermission('USER_INVITE'), validate(
         email: req.body.email,
         organisationId: req.user!.organisationId,
         role: req.body.role,
-        token: uuidv4(),
+        token: randomUUID(),
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });

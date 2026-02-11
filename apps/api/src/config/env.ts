@@ -17,7 +17,8 @@ const envSchema = z.object({
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().default(''),
   SMTP_PASS: z.string().default(''),
-  EMAIL_FROM: z.string().default('noreply@marinestream.io'),
+  EMAIL_FROM: z.string().default('onboarding@resend.dev'),
+  RESEND_API_KEY: z.string().default(''),
   APP_URL: z.string().default('http://localhost:5173'),
   API_URL: z.string().default('http://localhost:3001'),
 });

@@ -5,6 +5,7 @@ import { generateAccessToken, generateRefreshToken, verifyRefreshToken, TokenPay
 import { AppError } from '../middleware/error';
 import { auditService } from './audit.service';
 import { ROLE_DEFAULT_PERMISSIONS } from '@marinestream/shared';
+import { env } from '../config/env';
 
 const SALT_ROUNDS = 10;
 
@@ -32,35 +33,18 @@ export const authService = {
     // Check if there's a pending invitation for this email
     const invitation = await prisma.invitation.findFirst({
       where: { email: data.email, acceptedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
       include: { organisation: true },
     });
 
-    let orgUser;
-    if (invitation) {
-      // Accept invitation - join the inviting org with the invited role
-      const defaultPerms = (ROLE_DEFAULT_PERMISSIONS as any)[invitation.role] || ['VESSEL_VIEW', 'WORK_ORDER_VIEW'];
-      orgUser = await prisma.organisationUser.create({
-        data: {
-          userId: user.id,
-          organisationId: invitation.organisationId,
-          role: invitation.role,
-          permissions: JSON.stringify(defaultPerms),
-          isDefault: true,
-        },
-      });
-      await prisma.invitation.update({
-        where: { id: invitation.id },
-        data: { acceptedAt: new Date() },
-      });
-    } else {
-      // No invitation - create a personal org for the user (self-signup)
+    const createPersonalOrganisation = async () => {
       const personalOrg = await prisma.organisation.create({
         data: {
           name: `${data.firstName} ${data.lastName}`,
           type: 'VESSEL_OPERATOR',
         },
       });
-      orgUser = await prisma.organisationUser.create({
+      return prisma.organisationUser.create({
         data: {
           userId: user.id,
           organisationId: personalOrg.id,
@@ -69,6 +53,42 @@ export const authService = {
           isDefault: true,
         },
       });
+    };
+
+    let orgUser;
+    if (invitation) {
+      if (invitation.workOrderId) {
+        // Work-order collaboration invitation: keep user's own org boundary.
+        orgUser = await createPersonalOrganisation();
+      } else {
+        // Organisation invitation: join the inviting org with invited role.
+        const defaultPerms = (ROLE_DEFAULT_PERMISSIONS as any)[invitation.role] || ['VESSEL_VIEW', 'WORK_ORDER_VIEW'];
+        orgUser = await prisma.organisationUser.create({
+          data: {
+            userId: user.id,
+            organisationId: invitation.organisationId,
+            role: invitation.role,
+            permissions: JSON.stringify(defaultPerms),
+            isDefault: true,
+          },
+        });
+      }
+
+      await prisma.invitation.update({
+        where: { id: invitation.id },
+        data: { acceptedAt: new Date() },
+      });
+
+      if (invitation.workOrderId && invitation.assignmentRole) {
+        await prisma.workOrderAssignment.upsert({
+          where: { workOrderId_userId: { workOrderId: invitation.workOrderId, userId: user.id } },
+          update: { role: invitation.assignmentRole },
+          create: { workOrderId: invitation.workOrderId, userId: user.id, role: invitation.assignmentRole },
+        });
+      }
+    } else {
+      // No invitation - create a personal org for the user (self-signup)
+      orgUser = await createPersonalOrganisation();
     }
 
     await auditService.log({
@@ -207,10 +227,12 @@ export const authService = {
       },
     });
 
-    // In production, send email with reset link
-    // For dev, log the token to console so it can be used
-    console.log(`\n[PASSWORD RESET] Token for ${email}: ${token}`);
-    console.log(`[PASSWORD RESET] Reset URL: ${process.env.APP_URL}/reset-password?token=${token}\n`);
+    // Send branded reset email
+    const resetUrl = `${env.APP_URL}/reset-password?token=${token}`;
+    const { emailService } = await import('./email.service');
+    await emailService.sendPasswordReset({ toEmail: email, resetUrl });
+    console.log(`[PASSWORD RESET] Token for ${email}: ${token}`);
+    console.log(`[PASSWORD RESET] Reset URL: ${resetUrl}`);
 
     await auditService.log({
       actorId: user.id,

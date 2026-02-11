@@ -22,6 +22,7 @@ import reportRoutes from './routes/report.routes';
 import workflowRoutes from './routes/workflow.routes';
 import notificationRoutes from './routes/notification.routes';
 import workFormRoutes from './routes/work-form.routes';
+import inviteRoutes from './routes/invite.routes';
 import prisma from './config/database';
 
 const app = express();
@@ -58,6 +59,22 @@ app.use(auditContext);
 // Static files (uploads)
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+// Email previews (dev only)
+app.use('/email-previews', express.static(path.join(process.cwd(), 'email-previews')));
+app.get('/api/v1/email-previews', (_req, res) => {
+  const dir = path.join(process.cwd(), 'email-previews');
+  try {
+    const fs = require('fs');
+    if (!fs.existsSync(dir)) { res.json({ success: true, data: [] }); return; }
+    const files = fs.readdirSync(dir)
+      .filter((f: string) => f.endsWith('.html'))
+      .sort((a: string, b: string) => b.localeCompare(a))
+      .slice(0, 20)
+      .map((f: string) => ({ filename: f, url: `/email-previews/${f}` }));
+    res.json({ success: true, data: files });
+  } catch { res.json({ success: true, data: [] }); }
+});
+
 // Health check
 app.get('/api/v1/health', async (_req, res) => {
   const dbHealthy = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
@@ -71,6 +88,7 @@ app.get('/api/v1/health', async (_req, res) => {
 // API Routes
 app.use('/api/v1/auth', authLimiter, authRoutes);
 app.use('/api/v1', workFormRoutes); // Must be before /vessels so /vessels/:id/components is handled
+app.use('/api/v1', inviteRoutes);
 app.use('/api/v1/vessels', vesselRoutes);
 app.use('/api/v1/work-orders', workOrderRoutes);
 app.use('/api/v1/inspections', inspectionRoutes);

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
-import { app, cleanDatabase, createTestUserWithOrg } from '../helpers/test-app';
+import { app, cleanDatabase, createTestUserWithOrg, createTestOrg, createTestVesselWithComponents, createTestWorkOrder, prisma } from '../helpers/test-app';
+import { randomUUID } from 'crypto';
 
 describe('Auth API', () => {
   beforeEach(async () => {
@@ -47,6 +48,42 @@ describe('Auth API', () => {
         .send({ email: 'a@test.com', password: 'short', firstName: 'A', lastName: 'B' });
 
       expect(res.status).toBe(400);
+    });
+
+    it('should assign invited user to work order when invitation includes work-order context', async () => {
+      const org = await createTestOrg('Invite Org');
+      const vessel = await createTestVesselWithComponents(org.id);
+      const workOrder = await createTestWorkOrder(vessel.vessel.id, org.id);
+      const invitedEmail = 'new-invitee@test.com';
+
+      await prisma.invitation.create({
+        data: {
+          email: invitedEmail,
+          organisationId: org.id,
+          role: 'OPERATOR',
+          workOrderId: workOrder.id,
+          assignmentRole: 'TEAM_MEMBER',
+          token: randomUUID(),
+          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+
+      const res = await request(app)
+        .post('/api/v1/auth/register')
+        .send({ email: invitedEmail, password: 'password123', firstName: 'New', lastName: 'Invitee' });
+
+      expect(res.status).toBe(201);
+      const userId = res.body.data.user.id as string;
+      const assignment = await prisma.workOrderAssignment.findUnique({
+        where: {
+          workOrderId_userId: {
+            workOrderId: workOrder.id,
+            userId,
+          },
+        },
+      });
+      expect(assignment).toBeTruthy();
+      expect(assignment?.role).toBe('TEAM_MEMBER');
     });
   });
 

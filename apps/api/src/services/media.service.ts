@@ -22,7 +22,7 @@ export const mediaService = {
         thumbnailUrl: null,
         latitude: metadata.latitude ? parseFloat(metadata.latitude) : null,
         longitude: metadata.longitude ? parseFloat(metadata.longitude) : null,
-        tags: metadata.tags ? JSON.parse(metadata.tags) : [],
+        tags: metadata.tags || '[]',
       },
     });
 

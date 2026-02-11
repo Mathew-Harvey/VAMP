@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
-import { app, cleanDatabase, createTestUserWithOrg, createTestVesselWithComponents, createTestWorkOrder } from '../helpers/test-app';
+import { app, cleanDatabase, createTestUserWithOrg, createTestVesselWithComponents, createTestWorkOrder, createTestOrg, createTestUser, prisma } from '../helpers/test-app';
+import { generateAccessToken } from '../../src/config/auth';
 
 describe('Work Order API', () => {
   let token: string;
@@ -160,6 +161,193 @@ describe('Work Order API', () => {
 
       // UNDER_REVIEW → COMPLETED
       res = await request(app).patch(`/api/v1/work-orders/${wo.id}/status`).set(auth).send({ status: 'COMPLETED' });
+      expect(res.body.data.status).toBe('COMPLETED');
+      expect(res.body.data.completedAt).toBeDefined();
+    });
+  });
+
+  describe('Access control', () => {
+    it('should not allow cross-organisation work order fetches', async () => {
+      const orgA = await createTestOrg('Org A');
+      const vesselA = await createTestVesselWithComponents(orgA.id);
+      const workOrderA = await createTestWorkOrder(vesselA.vessel.id, orgA.id);
+
+      const orgB = await createTestOrg('Org B');
+      const userB = await createTestUser({ email: 'viewer-org-b@test.com' });
+      await prisma.organisationUser.create({
+        data: {
+          userId: userB.id,
+          organisationId: orgB.id,
+          role: 'VIEWER',
+          permissions: JSON.stringify(['WORK_ORDER_VIEW']),
+          isDefault: true,
+        },
+      });
+      const tokenB = generateAccessToken({
+        userId: userB.id,
+        email: userB.email,
+        organisationId: orgB.id,
+        role: 'VIEWER',
+        permissions: ['WORK_ORDER_VIEW'],
+      });
+
+      const res = await request(app)
+        .get(`/api/v1/work-orders/${workOrderA.id}`)
+        .set('Authorization', `Bearer ${tokenB}`);
+
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('should allow assigned collaborator from another organisation to view and list work orders', async () => {
+      const orgA = await createTestOrg('Owner Org');
+      const vesselA = await createTestVesselWithComponents(orgA.id);
+      const workOrderA = await createTestWorkOrder(vesselA.vessel.id, orgA.id);
+
+      const orgB = await createTestOrg('External Org');
+      const collaborator = await createTestUser({ email: 'external-collab@test.com' });
+      await prisma.organisationUser.create({
+        data: {
+          userId: collaborator.id,
+          organisationId: orgB.id,
+          role: 'VIEWER',
+          permissions: JSON.stringify([]),
+          isDefault: true,
+        },
+      });
+      await prisma.workOrderAssignment.create({
+        data: {
+          workOrderId: workOrderA.id,
+          userId: collaborator.id,
+          role: 'TEAM_MEMBER',
+        },
+      });
+      const collaboratorToken = generateAccessToken({
+        userId: collaborator.id,
+        email: collaborator.email,
+        organisationId: orgB.id,
+        role: 'VIEWER',
+        permissions: [],
+      });
+
+      const getRes = await request(app)
+        .get(`/api/v1/work-orders/${workOrderA.id}`)
+        .set('Authorization', `Bearer ${collaboratorToken}`);
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.data.id).toBe(workOrderA.id);
+
+      const listRes = await request(app)
+        .get('/api/v1/work-orders')
+        .set('Authorization', `Bearer ${collaboratorToken}`);
+      expect(listRes.status).toBe(200);
+      expect(listRes.body.data.some((wo: any) => wo.id === workOrderA.id)).toBe(true);
+    });
+
+    it('should prevent observer collaborator from editing form entries', async () => {
+      const orgA = await createTestOrg('Owner Org');
+      const vesselA = await createTestVesselWithComponents(orgA.id);
+      const workOrderA = await createTestWorkOrder(vesselA.vessel.id, orgA.id);
+
+      const ownerUser = await createTestUser({ email: 'owner-editor@test.com' });
+      await prisma.organisationUser.create({
+        data: {
+          userId: ownerUser.id,
+          organisationId: orgA.id,
+          role: 'MANAGER',
+          permissions: JSON.stringify(['WORK_ORDER_VIEW', 'WORK_ORDER_EDIT']),
+          isDefault: true,
+        },
+      });
+      const ownerToken = generateAccessToken({
+        userId: ownerUser.id,
+        email: ownerUser.email,
+        organisationId: orgA.id,
+        role: 'MANAGER',
+        permissions: ['WORK_ORDER_VIEW', 'WORK_ORDER_EDIT'],
+      });
+
+      const generated = await request(app)
+        .post(`/api/v1/work-orders/${workOrderA.id}/form/generate`)
+        .set('Authorization', `Bearer ${ownerToken}`);
+      const entryId = generated.body.data[0].id as string;
+
+      const orgB = await createTestOrg('Observer Org');
+      const observer = await createTestUser({ email: 'observer-collab@test.com' });
+      await prisma.organisationUser.create({
+        data: {
+          userId: observer.id,
+          organisationId: orgB.id,
+          role: 'VIEWER',
+          permissions: JSON.stringify([]),
+          isDefault: true,
+        },
+      });
+      await prisma.workOrderAssignment.create({
+        data: {
+          workOrderId: workOrderA.id,
+          userId: observer.id,
+          role: 'OBSERVER',
+        },
+      });
+      const observerToken = generateAccessToken({
+        userId: observer.id,
+        email: observer.email,
+        organisationId: orgB.id,
+        role: 'VIEWER',
+        permissions: [],
+      });
+
+      const res = await request(app)
+        .put(`/api/v1/form-entries/${entryId}`)
+        .set('Authorization', `Bearer ${observerToken}`)
+        .send({ notes: 'Trying to edit' });
+
+      expect(res.status).toBe(403);
+    });
+  });
+
+  describe('PATCH /api/v1/form-entries/:entryId/field', () => {
+    it('should update a single field on a form entry', async () => {
+      const wo = await createTestWorkOrder(vesselId, orgId);
+      await request(app).post(`/api/v1/work-orders/${wo.id}/form/generate`).set('Authorization', `Bearer ${token}`);
+      const form = await request(app).get(`/api/v1/work-orders/${wo.id}/form`).set('Authorization', `Bearer ${token}`);
+      const entryId = form.body.data[0].id;
+
+      const res = await request(app)
+        .patch(`/api/v1/form-entries/${entryId}/field`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ field: 'condition', value: 'FAIR' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.condition).toBe('FAIR');
+    });
+
+    it('should reject invalid fields', async () => {
+      const wo = await createTestWorkOrder(vesselId, orgId);
+      await request(app).post(`/api/v1/work-orders/${wo.id}/form/generate`).set('Authorization', `Bearer ${token}`);
+      const form = await request(app).get(`/api/v1/work-orders/${wo.id}/form`).set('Authorization', `Bearer ${token}`);
+      const entryId = form.body.data[0].id;
+
+      const res = await request(app)
+        .patch(`/api/v1/form-entries/${entryId}/field`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ field: 'workOrderId', value: 'hacked' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('should set completedAt when marking status as COMPLETED', async () => {
+      const wo = await createTestWorkOrder(vesselId, orgId);
+      await request(app).post(`/api/v1/work-orders/${wo.id}/form/generate`).set('Authorization', `Bearer ${token}`);
+      const form = await request(app).get(`/api/v1/work-orders/${wo.id}/form`).set('Authorization', `Bearer ${token}`);
+      const entryId = form.body.data[0].id;
+
+      const res = await request(app)
+        .patch(`/api/v1/form-entries/${entryId}/field`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ field: 'status', value: 'COMPLETED' });
+
+      expect(res.status).toBe(200);
       expect(res.body.data.status).toBe('COMPLETED');
       expect(res.body.data.completedAt).toBeDefined();
     });

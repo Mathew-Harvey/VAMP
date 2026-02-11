@@ -92,7 +92,12 @@ export async function cleanDatabase() {
     'vessel_components', 'niche_areas', 'vessels', 'notifications', 'audit_entries',
     'password_resets', 'invitations', 'organisation_users', 'users', 'organisations',
   ];
-  for (const table of tables) {
-    await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+  await prisma.$executeRawUnsafe('PRAGMA foreign_keys = OFF');
+  try {
+    for (const table of tables) {
+      await prisma.$executeRawUnsafe(`DELETE FROM "${table}"`);
+    }
+  } finally {
+    await prisma.$executeRawUnsafe('PRAGMA foreign_keys = ON');
   }
 }

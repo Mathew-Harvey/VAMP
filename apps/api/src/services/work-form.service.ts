@@ -135,6 +135,66 @@ export const workFormService = {
     };
   },
 
+  // Update a single field on a form entry (for real-time collaboration)
+  async updateField(entryId: string, field: string, value: any, userId: string) {
+    const existing = await prisma.workFormEntry.findUnique({ where: { id: entryId } });
+    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Form entry not found');
+
+    const allowedFields = [
+      'condition', 'foulingRating', 'foulingType', 'coverage',
+      'coatingCondition', 'corrosionType', 'corrosionSeverity',
+      'notes', 'recommendation', 'actionRequired', 'status',
+      'measurementType', 'measurementValue', 'measurementUnit',
+    ];
+    if (!allowedFields.includes(field)) {
+      throw new AppError(400, 'INVALID_FIELD', `Field '${field}' cannot be updated`);
+    }
+
+    const updateData: any = { [field]: value, updatedAt: new Date() };
+    if (field === 'status' && value === 'COMPLETED' && !existing.completedAt) {
+      updateData.completedAt = new Date();
+      updateData.completedBy = userId;
+    }
+
+    return prisma.workFormEntry.update({
+      where: { id: entryId },
+      data: updateData,
+      include: { vesselComponent: true },
+    });
+  },
+
+  // Append a screenshot (base64 data URL) to a form entry's attachments
+  async addScreenshot(entryId: string, dataUrl: string) {
+    const entry = await prisma.workFormEntry.findUnique({ where: { id: entryId } });
+    if (!entry) throw new AppError(404, 'NOT_FOUND', 'Form entry not found');
+
+    const attachments = JSON.parse(entry.attachments || '[]');
+    attachments.push(dataUrl);
+
+    return prisma.workFormEntry.update({
+      where: { id: entryId },
+      data: { attachments: JSON.stringify(attachments), updatedAt: new Date() },
+      include: { vesselComponent: true },
+    });
+  },
+
+  // Remove a screenshot from a form entry's attachments by index
+  async removeScreenshot(entryId: string, index: number) {
+    const entry = await prisma.workFormEntry.findUnique({ where: { id: entryId } });
+    if (!entry) throw new AppError(404, 'NOT_FOUND', 'Form entry not found');
+
+    const attachments = JSON.parse(entry.attachments || '[]');
+    if (index >= 0 && index < attachments.length) {
+      attachments.splice(index, 1);
+    }
+
+    return prisma.workFormEntry.update({
+      where: { id: entryId },
+      data: { attachments: JSON.stringify(attachments), updatedAt: new Date() },
+      include: { vesselComponent: true },
+    });
+  },
+
   // Add attachment (media ID) to a form entry
   async addAttachment(entryId: string, mediaId: string) {
     const entry = await prisma.workFormEntry.findUnique({ where: { id: entryId } });

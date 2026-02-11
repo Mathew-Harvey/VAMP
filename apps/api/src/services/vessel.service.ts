@@ -49,11 +49,27 @@ export const vesselService = {
   },
 
   async create(data: any, organisationId: string, userId: string) {
-    const payload = { ...data, organisationId } as any;
-    if (Array.isArray(payload.climateZones)) payload.climateZones = JSON.stringify(payload.climateZones);
-    const vessel = await prisma.vessel.create({
-      data: payload,
-    });
+    const payload: any = { organisationId };
+    // Copy only defined fields, serializing arrays/objects to JSON strings for SQLite
+    const stringFields = ['name', 'vesselType', 'imoNumber', 'mmsi', 'callSign', 'flagState',
+      'homePort', 'classificationSociety', 'afsCoatingType', 'afsManufacturer', 'afsProductName',
+      'tradingRoutes', 'operatingArea', 'bfmpDocumentUrl', 'bfmpRevision', 'regulatoryRef'];
+    const numFields = ['grossTonnage', 'lengthOverall', 'beam', 'maxDraft', 'minDraft',
+      'yearBuilt', 'afsServiceLife', 'typicalSpeed'];
+
+    for (const f of stringFields) { if (data[f] !== undefined) payload[f] = data[f]; }
+    for (const f of numFields) { if (data[f] !== undefined) payload[f] = data[f]; }
+
+    // JSON fields stored as strings in SQLite
+    payload.climateZones = JSON.stringify(data.climateZones || []);
+    if (data.metadata != null) payload.metadata = JSON.stringify(data.metadata);
+
+    // Date fields
+    if (data.afsApplicationDate) payload.afsApplicationDate = new Date(data.afsApplicationDate);
+    if (data.lastDrydockDate) payload.lastDrydockDate = new Date(data.lastDrydockDate);
+    if (data.nextDrydockDate) payload.nextDrydockDate = new Date(data.nextDrydockDate);
+
+    const vessel = await prisma.vessel.create({ data: payload });
 
     await auditService.log({
       actorId: userId,

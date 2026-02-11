@@ -77,6 +77,8 @@ model Invitation {
   email          String
   organisationId String
   role           String    // UserRole
+  workOrderId    String?
+  assignmentRole String?
   token          String    @unique
   expiresAt      DateTime
   acceptedAt     DateTime?

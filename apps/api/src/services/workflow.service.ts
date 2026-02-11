@@ -16,7 +16,7 @@ export const workflowService = {
         taskId,
         workOrderId,
         userId,
-        data: data.data || {},
+        data: JSON.stringify(data.data || {}),
         notes: data.notes,
         signature: data.signature,
         status: 'SUBMITTED',

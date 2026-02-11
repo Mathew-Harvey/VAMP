@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Inspection Report - {{workOrder.referenceNumber}}</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 10pt; color: #1e293b; line-height: 1.4; }
+
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #0ea5e9; padding-bottom: 10px; margin-bottom: 15px; }
+    .header h1 { font-size: 18pt; color: #0f172a; }
+    .header .meta { text-align: right; font-size: 8pt; color: #64748b; }
+    .header .logo { font-size: 14pt; font-weight: bold; color: #0ea5e9; }
+
+    .section { margin-bottom: 15px; page-break-inside: avoid; }
+    .section-title { font-size: 12pt; font-weight: bold; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-bottom: 8px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 8px; text-align: left; font-size: 9pt; }
+    th { background: #f1f5f9; font-weight: 600; color: #475569; }
+    .rating-0 { background: #dcfce7; } .rating-1 { background: #dcfce7; }
+    .rating-2 { background: #fef9c3; } .rating-3 { background: #fed7aa; }
+    .rating-4 { background: #fecaca; } .rating-5 { background: #fecaca; }
+
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+    .info-item { display: flex; gap: 4px; }
+    .info-label { font-weight: 600; color: #64748b; min-width: 100px; }
+
+    .photo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .photo-item { page-break-inside: avoid; }
+    .photo-item img { width: 100%; height: auto; max-height: 120px; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 4px; }
+    .photo-caption { font-size: 7pt; color: #64748b; margin-top: 2px; }
+
+    .component-section { page-break-inside: avoid; margin-bottom: 12px; border: 1px solid #e2e8f0; border-radius: 4px; padding: 8px; }
+    .component-header { font-weight: 600; font-size: 10pt; color: #0f172a; margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center; }
+    .component-meta { font-size: 8pt; color: #64748b; margin-bottom: 6px; }
+
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 7pt; font-weight: 600; }
+    .badge-good { background: #dcfce7; color: #166534; }
+    .badge-fair { background: #fef9c3; color: #854d0e; }
+    .badge-poor { background: #fed7aa; color: #9a3412; }
+    .badge-critical { background: #fecaca; color: #991b1b; }
+    .badge-action { background: #fecaca; color: #991b1b; }
+
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #94a3b8; border-top: 1px solid #e2e8f0; padding: 5px 15mm; }
+
+    .photo-page { page-break-before: always; }
+    .photo-page-grid { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(8, 1fr); gap: 4px; height: calc(297mm - 50mm); }
+    .photo-page-item { overflow: hidden; }
+    .photo-page-item img { width: 100%; height: 100%; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 3px; }
+    .photo-page-item .caption { font-size: 7pt; color: #475569; padding: 2px 0; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="logo">⚓ MarineStream</div>
+      <h1>Inspection Report</h1>
+    </div>
+    <div class="meta">
+      <div><strong>Reference:</strong> {{workOrder.referenceNumber}}</div>
+      <div><strong>Generated:</strong> {{generatedAt}}</div>
+      <div><strong>Status:</strong> {{workOrder.status}}</div>
+    </div>
+  </div>
+
+  <!-- Work Order Info -->
+  <div class="section">
+    <div class="section-title">Work Order Details</div>
+    <div class="info-grid">
+      <div class="info-item"><span class="info-label">Title:</span> {{workOrder.title}}</div>
+      <div class="info-item"><span class="info-label">Type:</span> {{workOrder.type}}</div>
+      <div class="info-item"><span class="info-label">Location:</span> {{workOrder.location}}</div>
+      <div class="info-item"><span class="info-label">Priority:</span> {{workOrder.priority}}</div>
+      <div class="info-item"><span class="info-label">Start:</span> {{workOrder.actualStart}}</div>
+      <div class="info-item"><span class="info-label">End:</span> {{workOrder.actualEnd}}</div>
+    </div>
+  </div>
+
+  <!-- Vessel Info -->
+  <div class="section">
+    <div class="section-title">Vessel Information</div>
+    <div class="info-grid">
+      <div class="info-item"><span class="info-label">Vessel:</span> {{vessel.name}}</div>
+      <div class="info-item"><span class="info-label">Type:</span> {{vessel.vesselType}}</div>
+      <div class="info-item"><span class="info-label">IMO:</span> {{vessel.imoNumber}}</div>
+      <div class="info-item"><span class="info-label">Home Port:</span> {{vessel.homePort}}</div>
+    </div>
+  </div>
+
+  <!-- Team -->
+  <div class="section">
+    <div class="section-title">Inspection Team</div>
+    <table>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th></tr></thead>
+      <tbody>
+        {{#each team}}
+        <tr><td>{{this.name}}</td><td>{{this.email}}</td><td>{{this.role}}</td></tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Findings Summary Table -->
+  <div class="section">
+    <div class="section-title">Findings Summary</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Component</th>
+          <th>Category</th>
+          <th>Condition</th>
+          <th>Fouling</th>
+          <th>Coverage</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{#each entries}}
+        <tr class="{{#if this.foulingRating}}rating-{{this.foulingRating}}{{/if}}">
+          <td>{{this.component}}</td>
+          <td>{{this.category}}</td>
+          <td>
+            {{#if this.condition}}
+            <span class="badge badge-{{toLowerCase this.condition}}">{{this.condition}}</span>
+            {{else}}—{{/if}}
+          </td>
+          <td>{{#if this.foulingRating}}{{this.foulingRating}}/5{{else}}—{{/if}}</td>
+          <td>{{#if this.coverage}}{{this.coverage}}%{{else}}—{{/if}}</td>
+          <td>{{#if this.actionRequired}}<span class="badge badge-action">YES</span>{{else}}No{{/if}}</td>
+        </tr>
+        {{/each}}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Detailed Findings with Notes -->
+  <div class="section">
+    <div class="section-title">Detailed Findings</div>
+    {{#each entries}}
+    {{#if this.notes}}
+    <div class="component-section">
+      <div class="component-header">
+        {{this.component}}
+        {{#if this.condition}}<span class="badge badge-{{toLowerCase this.condition}}">{{this.condition}}</span>{{/if}}
+      </div>
+      <div class="component-meta">{{this.category}} · {{this.location}}</div>
+      {{#if this.notes}}<p><strong>Notes:</strong> {{this.notes}}</p>{{/if}}
+      {{#if this.recommendation}}<p><strong>Recommendation:</strong> {{this.recommendation}}</p>{{/if}}
+      {{#if this.foulingType}}<p><strong>Fouling Type:</strong> {{this.foulingType}}</p>{{/if}}
+      {{#if this.coatingCondition}}<p><strong>Coating:</strong> {{this.coatingCondition}}</p>{{/if}}
+    </div>
+    {{/if}}
+    {{/each}}
+  </div>
+
+  <!-- Photo Evidence Pages - 2 columns x 8 rows per A4 page -->
+  {{#each photoPages}}
+  <div class="photo-page">
+    <div class="section-title" style="margin-bottom: 8px;">Photo Evidence {{#if @index}}(continued){{/if}} — {{this.sectionName}}</div>
+    <div class="photo-page-grid">
+      {{#each this.photos}}
+      <div class="photo-page-item">
+        <img src="{{this.src}}" alt="{{this.caption}}" />
+        <div class="caption">{{this.caption}}</div>
+      </div>
+      {{/each}}
+    </div>
+  </div>
+  {{/each}}
+
+  <div class="footer">
+    MarineStream — {{organisation.name}} — Report {{workOrder.referenceNumber}} — Generated {{generatedAt}} — Page <span class="pageNumber"></span>
+  </div>
+</body>
+</html>
