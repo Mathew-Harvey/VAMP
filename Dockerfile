@@ -30,7 +30,8 @@ COPY --from=builder /app/packages/shared/package.json ./packages/shared/package.
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
 COPY --from=builder /app/apps/api/prisma ./apps/api/prisma
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
+# Copy Prisma client (generated at root node_modules/.prisma)
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 
 WORKDIR /app/apps/api
 
