@@ -27,6 +27,16 @@ import prisma from './config/database';
 
 const app = express();
 
+// Health check endpoint
+app.get('/api/v1/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  } catch (error) {
+    res.status(503).json({ status: 'error', message: 'Database unavailable' });
+  }
+});
+
 // Security
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({

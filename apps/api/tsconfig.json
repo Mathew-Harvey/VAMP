@@ -8,7 +8,8 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    "noImplicitAny": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
