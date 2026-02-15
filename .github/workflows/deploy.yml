@@ -1,0 +1,27 @@
+name: Deploy to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deployment
+        run: |
+          # This requires RENDER_API_TOKEN to be set in GitHub secrets
+          # Get the service IDs from Render and set them as secrets
+          echo "To deploy to Render:"
+          echo "1. Go to https://dashboard.render.com"
+          echo "2. Create a new Blueprint deployment or connect the GitHub repo"
+          echo "3. Set the following secrets in GitHub:"
+          echo "   - RENDER_API_TOKEN"
+          echo "   - RENDER_API_SERVICE_ID (for API)"
+          echo "   - RENDER_WEB_SERVICE_ID (for Web)"
+          echo ""
+          echo "Or manually deploy by:"
+          echo "1. Going to Render dashboard"
+          echo "2. Creating a new Blueprint deployment"
+          echo "3. Selecting this repository and the render.yaml file"
