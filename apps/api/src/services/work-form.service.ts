@@ -105,6 +105,11 @@ export const workFormService = {
         vesselType: workOrder.vessel.vesselType,
         imoNumber: workOrder.vessel.imoNumber,
         homePort: workOrder.vessel.homePort,
+        lengthOverall: workOrder.vessel.lengthOverall,
+        beam: workOrder.vessel.beam,
+        maxDraft: workOrder.vessel.maxDraft,
+        grossTonnage: workOrder.vessel.grossTonnage,
+        yearBuilt: workOrder.vessel.yearBuilt,
       },
       organisation: {
         name: workOrder.organisation.name,
@@ -115,6 +120,7 @@ export const workFormService = {
         role: a.role,
       })),
       entries: entries.map((e) => ({
+        id: e.id,
         component: e.vesselComponent.name,
         category: e.vesselComponent.category,
         location: e.vesselComponent.location,
