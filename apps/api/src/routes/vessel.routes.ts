@@ -30,7 +30,7 @@ router.post('/', authenticate, requirePermission('VESSEL_CREATE'), validate(crea
 
 router.get('/:id', authenticate, requirePermission('VESSEL_VIEW'), async (req: Request, res: Response) => {
   try {
-    const vessel = await vesselService.getById((req.params.id as string));
+    const vessel = await vesselService.getById((req.params.id as string), req.user!.organisationId);
     res.json({ success: true, data: vessel });
   } catch (error: any) {
     res.status(error.statusCode || 500).json({ success: false, error: { code: error.code || 'ERROR', message: error.message } });

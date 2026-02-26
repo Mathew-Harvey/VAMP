@@ -1,4 +1,10 @@
+import path from 'path';
+import dotenv from 'dotenv';
 import { z } from 'zod';
+
+// Load .env from monorepo root (when running via npm run dev from root) or cwd
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '../../.env') }); // from apps/api
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -21,6 +27,11 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().default(''),
   APP_URL: z.string().default('http://localhost:5173'),
   API_URL: z.string().default('http://localhost:3001'),
+  // Optional: Rise-X third-party API sync (script only)
+  RISE_X_API_URL: z.string().default(''),
+  RISE_X_API_KEY: z.string().optional().default(''),
+  // Optional: org id for synced fleet vessels (visible to all logged-in users)
+  FLEET_ORG_ID: z.string().optional().default(''),
 });
 
 export type Env = z.infer<typeof envSchema>;

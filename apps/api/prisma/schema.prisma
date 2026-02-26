@@ -109,8 +109,10 @@ model PasswordReset {
 model Vessel {
   id                    String   @id @default(cuid())
   organisationId        String
+  externalId            String?  @unique // e.g. Rise-X asset id for sync
+  source                String?  // e.g. 'RISE_X' for read-only fleet data
   name                  String
-  imoNumber             String?  @unique
+  imoNumber             String?
   mmsi                  String?
   callSign              String?
   flagState             String?
